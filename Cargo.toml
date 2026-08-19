@@ -1,0 +1,35 @@
+[package]
+name = "lan-chat"
+version = "0.4.1"
+edition = "2024"
+rust-version = "1.88"
+description = "Anonymous LAN chat with a durable gateway and peer-to-peer private messages"
+license = "MIT"
+
+[dependencies]
+anyhow = "1.0"
+blake3 = "1.8"
+chacha20poly1305 = "0.10"
+clap = { version = "4.5", features = ["derive"] }
+crossterm = { version = "0.29", features = ["event-stream"] }
+futures-util = "0.3"
+getrandom = "0.3"
+ratatui = { version = "0.30", default-features = false, features = ["crossterm"] }
+rusqlite = { version = "0.40", features = ["backup", "bundled"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+snow = "0.10"
+socket2 = "0.6"
+subtle = "2.6"
+tokio = { version = "1.47", features = ["io-util", "macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
+unicode-width = "0.2"
+uuid = { version = "1.18", features = ["serde", "v4"] }
+zeroize = "1.9"
+
+[dev-dependencies]
+tempfile = "3.23"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true

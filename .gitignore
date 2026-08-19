@@ -1,0 +1,12 @@
+/target/
+*.log
+.DS_Store
+
+# Runtime data and bearer secrets must never enter source control.
+lan-chat-data/
+backups/
+gateway.sqlite3*
+gateway-db.key
+gateway-noise.key
+credentials.json
+.env
