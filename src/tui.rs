@@ -706,6 +706,7 @@ struct ChatApp {
     access_mode: GroupAccessMode,
     role: GroupRole,
     session_id: Uuid,
+    member_id: Uuid,
     endpoint: String,
     fingerprint: String,
     protocol_version: u16,
@@ -725,6 +726,12 @@ struct ChatApp {
 
 impl ChatApp {
     fn new(session: &SessionInfo) -> Self {
+        let member_id = session
+            .members
+            .iter()
+            .find(|member| member.session_id == session.session_id)
+            .map(|member| member.member_id)
+            .unwrap_or_else(Uuid::nil);
         let members = session
             .members
             .iter()
@@ -768,6 +775,7 @@ impl ChatApp {
             access_mode: session.access_mode,
             role: session.role,
             session_id: session.session_id,
+            member_id,
             endpoint: session.endpoint.to_string(),
             fingerprint: session.server_fingerprint.clone(),
             protocol_version: session.protocol_version,
@@ -2201,7 +2209,7 @@ fn render_active_messages(frame: &mut Frame<'_>, area: Rect, app: &ChatApp) {
                     },
                     room.summary.room_name
                 ),
-                room_lines(&room.items),
+                room_lines(&room.items, app.member_id),
             )
         }
         ConversationTarget::Private(peer_id) => {
@@ -2212,7 +2220,7 @@ fn render_active_messages(frame: &mut Frame<'_>, area: Rect, app: &ChatApp) {
                 .unwrap_or_default();
             (
                 format!(" @{}{} ", private.peer.nickname, lock),
-                direct_lines(&private.items),
+                direct_lines(&private.items, app.session_id),
             )
         }
     };
@@ -2233,7 +2241,7 @@ fn render_active_messages(frame: &mut Frame<'_>, area: Rect, app: &ChatApp) {
     );
 }
 
-fn room_lines(items: &VecDeque<UiItem>) -> Vec<Line<'static>> {
+fn room_lines(items: &VecDeque<UiItem>, own_member_id: Uuid) -> Vec<Line<'static>> {
     if items.is_empty() {
         return vec![Line::styled(
             "  No messages yet.",
@@ -2252,13 +2260,14 @@ fn room_lines(items: &VecDeque<UiItem>) -> Vec<Line<'static>> {
                 message.sent_at_ms,
                 &message.sender.nickname,
                 &message.text,
+                message.sender.member_id == own_member_id,
             ),
         }
     }
     lines
 }
 
-fn direct_lines(items: &VecDeque<DirectRecord>) -> Vec<Line<'static>> {
+fn direct_lines(items: &VecDeque<DirectRecord>, own_session_id: Uuid) -> Vec<Line<'static>> {
     if items.is_empty() {
         return vec![Line::styled(
             "  Send one message. The sender must then wait for one reply.",
@@ -2272,6 +2281,7 @@ fn direct_lines(items: &VecDeque<DirectRecord>) -> Vec<Line<'static>> {
             message.sent_at_ms,
             &message.sender.nickname,
             &message.text,
+            message.sender.session_id == own_session_id,
         );
     }
     lines
@@ -2282,19 +2292,37 @@ fn append_message_lines(
     sent_at_ms: u64,
     nickname: &str,
     text: &str,
+    own_message: bool,
 ) {
     let mut text_lines = text.lines();
     let first = text_lines.next().unwrap_or_default();
-    lines.push(Line::from(vec![
-        Span::styled(
-            format!(" {} ", short_time(sent_at_ms)),
-            Style::default().fg(Color::DarkGray),
-        ),
-        Span::styled(format!("{nickname} "), nickname_style(nickname)),
-        Span::raw(first.to_owned()),
-    ]));
-    for continuation in text_lines {
-        lines.push(Line::raw(format!("          {continuation}")));
+    if own_message {
+        lines.push(
+            Line::from(vec![
+                Span::raw(first.to_owned()),
+                Span::styled(format!("  {nickname}"), nickname_style(nickname)),
+                Span::styled(
+                    format!(" {} ", short_time(sent_at_ms)),
+                    Style::default().fg(Color::DarkGray),
+                ),
+            ])
+            .right_aligned(),
+        );
+        for continuation in text_lines {
+            lines.push(Line::raw(format!("{continuation} ")).right_aligned());
+        }
+    } else {
+        lines.push(Line::from(vec![
+            Span::styled(
+                format!(" {} ", short_time(sent_at_ms)),
+                Style::default().fg(Color::DarkGray),
+            ),
+            Span::styled(format!("{nickname} "), nickname_style(nickname)),
+            Span::raw(first.to_owned()),
+        ]));
+        for continuation in text_lines {
+            lines.push(Line::raw(format!("          {continuation}")));
+        }
     }
 }
 
@@ -2938,7 +2966,7 @@ fn tail_by_width(value: &str, maximum_width: usize) -> String {
 mod tests {
     use super::*;
     use crate::protocol::PROTOCOL_MAX;
-    use ratatui::backend::TestBackend;
+    use ratatui::{backend::TestBackend, layout::Alignment};
 
     fn test_session() -> SessionInfo {
         let session_id = Uuid::new_v4();
@@ -2981,6 +3009,59 @@ mod tests {
     #[test]
     fn utc_clock_rendering_is_stable() {
         assert_eq!(short_time(3_723_000), "01:02:03");
+    }
+
+    #[test]
+    fn own_messages_are_right_aligned_across_group_reconnects() {
+        let session = test_session();
+        let app = ChatApp::new(&session);
+        let items = VecDeque::from([
+            UiItem::Chat(ChatRecord {
+                sequence: 1,
+                message_id: Uuid::new_v4(),
+                sender: Peer {
+                    session_id: Uuid::new_v4(),
+                    member_id: app.member_id,
+                    nickname: "Alice".to_owned(),
+                    direct: None,
+                },
+                room_id: "general".to_owned(),
+                sent_at_ms: 1,
+                text: "my older message".to_owned(),
+            }),
+            UiItem::Chat(ChatRecord {
+                sequence: 2,
+                message_id: Uuid::new_v4(),
+                sender: Peer {
+                    session_id: Uuid::new_v4(),
+                    member_id: Uuid::new_v4(),
+                    nickname: "Bob".to_owned(),
+                    direct: None,
+                },
+                room_id: "general".to_owned(),
+                sent_at_ms: 2,
+                text: "their message".to_owned(),
+            }),
+        ]);
+
+        let lines = room_lines(&items, app.member_id);
+        assert_eq!(lines[0].alignment, Some(Alignment::Right));
+        assert_eq!(lines[1].alignment, None);
+    }
+
+    #[test]
+    fn own_direct_messages_are_right_aligned() {
+        let session = test_session();
+        let records = VecDeque::from([DirectRecord {
+            message_id: Uuid::new_v4(),
+            sender: session.members[0].clone(),
+            recipient_session_id: Uuid::new_v4(),
+            sent_at_ms: 1,
+            text: "hello".to_owned(),
+        }]);
+
+        let lines = direct_lines(&records, session.session_id);
+        assert_eq!(lines[0].alignment, Some(Alignment::Right));
     }
 
     #[test]

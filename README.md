@@ -111,6 +111,7 @@ Lobby controls:
 Chat controls:
 
 - type and press `Enter` to send
+- your messages are right-aligned; messages from other members stay on the left
 - `Tab`/`Shift+Tab`: focus input, rooms/conversations, or members
 - select a room and press `Enter` to join/open it
 - select an online member and press `Enter` to start a direct private chat
