@@ -130,6 +130,12 @@ identity. It does not hide network metadata:
 This is not an anonymity network, and group chat is not participant-to-
 participant end-to-end encrypted.
 
+The TUI's `F3` focus mode hides gateway, group, room-list, member-list,
+fingerprint, status and shortcut details from the screen. This is only visual
+privacy against casual shoulder-surfing. It does not change message storage,
+transport security, terminal scrollback, process visibility or network
+metadata.
+
 The gateway currently has no automatic retention or disk-quota policy. An
 operator must monitor free space and choose when to archive or remove data.
 

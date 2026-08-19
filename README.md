@@ -121,6 +121,7 @@ Chat controls:
 - select a room and press `Enter` to join/open it
 - select an online member and press `Enter` to start a direct private chat
 - `F2`: create and join a room
+- `F3`: toggle focus mode, showing only the active conversation and message input
 - `F4`: administrators review, approve, or reject pending group joins
 - `F5`: manage the active private room's member list
 - `F6`: administrators ban or unban persistent group members

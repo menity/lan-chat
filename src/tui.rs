@@ -722,6 +722,7 @@ struct ChatApp {
     status: String,
     scroll_from_bottom: usize,
     connected: bool,
+    focus_mode: bool,
 }
 
 impl ChatApp {
@@ -794,6 +795,7 @@ impl ChatApp {
             status: "Encrypted connection established".to_owned(),
             scroll_from_bottom: 0,
             connected: true,
+            focus_mode: false,
         };
         app.sync_conversation_selection();
         app
@@ -1072,6 +1074,16 @@ impl ChatApp {
     fn handle_key(&mut self, key: KeyEvent) -> Result<ChatKeyAction> {
         let access_mode = self.access_mode;
         let role = self.role;
+        if self.overlay.is_none() && key.code == KeyCode::F(3) {
+            self.focus_mode = !self.focus_mode;
+            self.focus = ChatFocus::Input;
+            self.status = if self.focus_mode {
+                "Focus mode enabled — F3 restores the full view".to_owned()
+            } else {
+                "Full view restored".to_owned()
+            };
+            return Ok(ChatKeyAction::None);
+        }
         if let Some(overlay) = &mut self.overlay {
             return match overlay {
                 ChatOverlay::CreateRoom { name, visibility } => match key.code {
@@ -1334,6 +1346,13 @@ impl ChatApp {
                 }
                 _ => {}
             }
+        }
+
+        if self.focus_mode {
+            return match key.code {
+                KeyCode::Esc => Ok(ChatKeyAction::Back),
+                _ => self.handle_input_key(key),
+            };
         }
 
         match key.code {
@@ -1951,6 +1970,19 @@ fn render_lobby_help(frame: &mut Frame<'_>, area: Rect, _app: &LobbyApp) {
 
 fn render_chat_app(frame: &mut Frame<'_>, app: &ChatApp) {
     let area = frame.area();
+    if app.focus_mode {
+        if area.width < 24 || area.height < 6 {
+            render_too_small(frame, area, 24, 6);
+            return;
+        }
+        let rows = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Min(3), Constraint::Length(3)])
+            .split(area);
+        render_active_messages(frame, rows[0], app);
+        render_chat_input(frame, rows[1], app);
+        return;
+    }
     if area.width < 30 || area.height < 10 {
         render_too_small(frame, area, 30, 10);
         return;
@@ -2377,7 +2409,7 @@ fn render_chat_footer(frame: &mut Frame<'_>, area: Rect, app: &ChatApp) {
         ""
     };
     let text = format!(
-        " {}  •  Tab panels  •  F2 new room  •  F5 private members{admin_help}  •  Esc groups  •  v{}  •  {} ",
+        " {}  •  Tab panels  •  F2 new room  •  F3 focus  •  F5 private members{admin_help}  •  Esc groups  •  v{}  •  {} ",
         app.status, app.protocol_version, app.fingerprint,
     );
     frame.render_widget(
@@ -3068,6 +3100,57 @@ mod tests {
     fn tiny_terminals_render_a_resize_hint_without_panicking() {
         let app = ChatApp::new(&test_session());
         let backend = TestBackend::new(18, 5);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| render_chat_app(frame, &app)).unwrap();
+    }
+
+    #[test]
+    fn focus_mode_toggles_and_keeps_keyboard_focus_on_message_input() {
+        let mut app = ChatApp::new(&test_session());
+        app.focus = ChatFocus::Members;
+
+        app.handle_key(KeyEvent::new(KeyCode::F(3), KeyModifiers::NONE))
+            .unwrap();
+        assert!(app.focus_mode);
+        assert!(matches!(app.focus, ChatFocus::Input));
+
+        app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE))
+            .unwrap();
+        assert!(matches!(app.focus, ChatFocus::Input));
+
+        app.handle_key(KeyEvent::new(KeyCode::F(3), KeyModifiers::NONE))
+            .unwrap();
+        assert!(!app.focus_mode);
+    }
+
+    #[test]
+    fn focus_mode_renders_only_the_active_conversation_and_input() {
+        let mut app = ChatApp::new(&test_session());
+        app.focus_mode = true;
+        let backend = TestBackend::new(80, 12);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| render_chat_app(frame, &app)).unwrap();
+
+        let rendered: String = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect();
+        assert!(rendered.contains("#general"));
+        assert!(rendered.contains("MESSAGE"));
+        assert!(!rendered.contains("LAN CHAT"));
+        assert!(!rendered.contains("ROOMS / DMS"));
+        assert!(!rendered.contains("MEMBERS"));
+        assert!(!rendered.contains(&app.fingerprint));
+    }
+
+    #[test]
+    fn focus_mode_supports_a_six_row_terminal() {
+        let mut app = ChatApp::new(&test_session());
+        app.focus_mode = true;
+        let backend = TestBackend::new(24, 6);
         let mut terminal = Terminal::new(backend).unwrap();
         terminal.draw(|frame| render_chat_app(frame, &app)).unwrap();
     }

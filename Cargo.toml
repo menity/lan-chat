@@ -1,6 +1,6 @@
 [package]
 name = "lan-chat"
-version = "0.4.2"
+version = "0.4.3"
 edition = "2024"
 rust-version = "1.88"
 description = "Anonymous LAN chat with a durable gateway and peer-to-peer private messages"
