@@ -1,0 +1,173 @@
+name: Build binaries
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: binaries-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: "1"
+
+jobs:
+  quality:
+    name: Format, lint, and test
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Select stable Rust
+        run: |
+          rustup update stable --no-self-update
+          rustup default stable
+          rustup component add clippy rustfmt
+
+      - name: Cache Cargo data
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: quality-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Run Clippy
+        run: cargo clippy --all-targets --locked -- -D warnings
+
+      - name: Run tests
+        run: cargo test --all-targets --locked
+
+  build:
+    name: ${{ matrix.artifact }}
+    needs: quality
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+            artifact: lan-chat-linux-x86_64
+            executable: lan-chat
+            archive: lan-chat-linux-x86_64.tar.gz
+          - runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            artifact: lan-chat-linux-aarch64
+            executable: lan-chat
+            archive: lan-chat-linux-aarch64.tar.gz
+          - runner: macos-15-intel
+            target: x86_64-apple-darwin
+            artifact: lan-chat-macos-x86_64
+            executable: lan-chat
+            archive: lan-chat-macos-x86_64.tar.gz
+          - runner: macos-15
+            target: aarch64-apple-darwin
+            artifact: lan-chat-macos-aarch64
+            executable: lan-chat
+            archive: lan-chat-macos-aarch64.tar.gz
+          - runner: windows-2022
+            target: x86_64-pc-windows-msvc
+            artifact: lan-chat-windows-x86_64
+            executable: lan-chat.exe
+            archive: lan-chat-windows-x86_64.zip
+          - runner: windows-11-arm
+            target: aarch64-pc-windows-msvc
+            artifact: lan-chat-windows-aarch64
+            executable: lan-chat.exe
+            archive: lan-chat-windows-aarch64.zip
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Select stable Rust
+        shell: bash
+        run: |
+          rustup update stable --no-self-update
+          rustup default stable
+          rustup target add "${{ matrix.target }}"
+
+      - name: Cache Cargo data
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: build-${{ runner.os }}-${{ runner.arch }}-${{ matrix.target }}-${{ hashFiles('Cargo.lock') }}
+
+      - name: Build release binary
+        run: cargo build --locked --release --target ${{ matrix.target }}
+
+      - name: Package Unix binary
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          package="${{ matrix.artifact }}"
+          mkdir -p "dist/$package"
+          cp "target/${{ matrix.target }}/release/${{ matrix.executable }}" "dist/$package/lan-chat"
+          cp README.md SECURITY.md LICENSE "dist/$package/"
+          chmod +x "dist/$package/lan-chat"
+          tar -C dist -czf "dist/${{ matrix.archive }}" "$package"
+          if [[ "$RUNNER_OS" == "macOS" ]]; then
+            (cd dist && shasum -a 256 "${{ matrix.archive }}" > "${{ matrix.archive }}.sha256")
+          else
+            (cd dist && sha256sum "${{ matrix.archive }}" > "${{ matrix.archive }}.sha256")
+          fi
+
+      - name: Package Windows binary
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $package = "${{ matrix.artifact }}"
+          $packageDirectory = "dist/$package"
+          $archive = "dist/${{ matrix.archive }}"
+          New-Item -ItemType Directory -Force -Path $packageDirectory | Out-Null
+          Copy-Item "target/${{ matrix.target }}/release/${{ matrix.executable }}" "$packageDirectory/lan-chat.exe"
+          Copy-Item README.md, SECURITY.md, LICENSE $packageDirectory
+          Compress-Archive -Path "$packageDirectory/*" -DestinationPath $archive
+          $hash = (Get-FileHash -Algorithm SHA256 $archive).Hash.ToLowerInvariant()
+          "$hash  ${{ matrix.archive }}" | Out-File -Encoding ascii "$archive.sha256"
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            dist/${{ matrix.archive }}
+            dist/${{ matrix.archive }}.sha256
+          if-no-files-found: error
+          retention-days: 30
+
+  release:
+    name: Publish tagged release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Download all platform artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: lan-chat-*
+          path: dist
+          merge-multiple: true
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/* --verify-tag --generate-notes

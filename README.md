@@ -41,6 +41,11 @@ The resulting `target/release/lan-chat` is the only executable needed on both
 gateway and client machines. The target machine does not need a Rust runtime or
 a separately installed SQLite library.
 
+Every push to `main` runs formatting, Clippy, and the complete test suite, then
+publishes 30-day GitHub Actions artifacts for Linux, macOS, and Windows on
+x86_64 and ARM64. Pushing a `v*` tag also attaches all six archives and their
+SHA-256 files to a GitHub Release.
+
 Protocol v5 is intentionally incompatible with earlier clients because member
 identities, private-room authorization, and token rotation are protocol-level
 features. Existing schema-v1 and schema-v2 gateway databases are migrated to
