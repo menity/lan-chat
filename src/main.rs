@@ -417,8 +417,7 @@ async fn run_interactive(mut nickname: String) -> Result<()> {
                 group_id,
             } => {
                 credentials.remove(gateway_id, group_id)?;
-                lobby_notice =
-                    Some("Saved credential removed; the next join will ask again".to_owned());
+                lobby_notice = Some("已删除本机凭据，下次加入时将重新验证".to_owned());
             }
             tui::LobbyAction::Join {
                 endpoint,
@@ -452,13 +451,13 @@ async fn run_interactive(mut nickname: String) -> Result<()> {
                         if let Err(error) =
                             persist_connection_credentials(&mut credentials, &connection, supplied)
                         {
-                            lobby_notice = Some(format!("Could not save credential: {error:#}"));
+                            lobby_notice = Some(format!("无法保存本机凭据：{error:#}"));
                             continue;
                         }
                         match tui::run_chat(*connection, &mut credentials).await {
                             Ok(tui::ChatAction::BackToLobby) => {}
                             Ok(tui::ChatAction::QuitApplication) => return Ok(()),
-                            Err(error) => lobby_notice = Some(format!("Chat closed: {error:#}")),
+                            Err(error) => lobby_notice = Some(format!("聊天已中断：{error:#}")),
                         }
                     }
                     Ok(client::JoinOutcome::Pending(pending)) => {
@@ -469,11 +468,11 @@ async fn run_interactive(mut nickname: String) -> Result<()> {
                             None,
                         )?;
                         lobby_notice = Some(format!(
-                            "Join request {} submitted; select the group again after approval",
+                            "加入申请 {} 已提交，通过审批后请重新选择该群组",
                             pending.request_id
                         ));
                     }
-                    Err(error) => lobby_notice = Some(format!("Could not join: {error:#}")),
+                    Err(error) => lobby_notice = Some(format!("无法加入群组：{error:#}")),
                 }
             }
             tui::LobbyAction::Create {
@@ -496,10 +495,10 @@ async fn run_interactive(mut nickname: String) -> Result<()> {
                         match tui::run_chat(connection, &mut credentials).await {
                             Ok(tui::ChatAction::BackToLobby) => {}
                             Ok(tui::ChatAction::QuitApplication) => return Ok(()),
-                            Err(error) => lobby_notice = Some(format!("Chat closed: {error:#}")),
+                            Err(error) => lobby_notice = Some(format!("聊天已中断：{error:#}")),
                         }
                     }
-                    Err(error) => lobby_notice = Some(format!("Could not create group: {error:#}")),
+                    Err(error) => lobby_notice = Some(format!("无法创建群组：{error:#}")),
                 }
             }
         }
