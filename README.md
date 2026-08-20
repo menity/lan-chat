@@ -173,15 +173,21 @@ creates a new group, and enters it immediately. Use `--access public`,
 The default client credential file is:
 
 ```text
+# Windows
+%LOCALAPPDATA%\lan-chat\credentials.json
+
+# Linux and macOS
 $XDG_DATA_HOME/lan-chat/credentials.json
 # or ~/.local/share/lan-chat/credentials.json
 ```
 
-Set `LAN_CHAT_CLIENT_DATA_DIR` to choose another directory. On Unix the
-directory is forced to mode `0700` and the file to `0600`. The tokens are
-plaintext inside that OS-protected file, so include it in a secure personal
-backup if administrator access must survive deletion of all client data.
-Uninstalling only the binary normally leaves this file intact.
+On Windows, `APPDATA` and then `USERPROFILE` are used as fallbacks when
+`LOCALAPPDATA` is unavailable. Set `LAN_CHAT_CLIENT_DATA_DIR` on any platform
+to choose another directory. On Unix the directory is forced to mode `0700`
+and the file to `0600`. The tokens are plaintext inside that OS-protected file,
+so include it in a secure personal backup if administrator access must survive
+deletion of all client data. Uninstalling only the binary normally leaves this
+file intact.
 
 ```sh
 lan-chat credentials path

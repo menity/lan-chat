@@ -1,6 +1,8 @@
 use std::{
     collections::BTreeMap,
-    env, fs,
+    env,
+    ffi::OsString,
+    fs,
     fs::OpenOptions,
     io::Write,
     path::{Path, PathBuf},
@@ -36,15 +38,7 @@ pub struct CredentialStore {
 
 impl CredentialStore {
     pub fn open_default() -> Result<Self> {
-        let directory = if let Some(path) = env::var_os("LAN_CHAT_CLIENT_DATA_DIR") {
-            PathBuf::from(path)
-        } else if let Some(path) = env::var_os("XDG_DATA_HOME") {
-            PathBuf::from(path).join("lan-chat")
-        } else if let Some(path) = env::var_os("HOME") {
-            PathBuf::from(path).join(".local/share/lan-chat")
-        } else {
-            bail!("cannot locate a client data directory; set LAN_CHAT_CLIENT_DATA_DIR or HOME");
-        };
+        let directory = default_client_data_directory_for(cfg!(windows), |name| env::var_os(name))?;
         Self::open_at(directory.join("credentials.json"))
     }
 
@@ -162,6 +156,44 @@ impl CredentialStore {
     }
 }
 
+fn default_client_data_directory_for<F>(windows: bool, read_env: F) -> Result<PathBuf>
+where
+    F: Fn(&str) -> Option<OsString>,
+{
+    let env_path = |name| {
+        read_env(name)
+            .filter(|value| !value.as_os_str().is_empty())
+            .map(PathBuf::from)
+    };
+
+    if let Some(path) = env_path("LAN_CHAT_CLIENT_DATA_DIR") {
+        return Ok(path);
+    }
+
+    if windows {
+        if let Some(path) = env_path("LOCALAPPDATA") {
+            return Ok(path.join("lan-chat"));
+        }
+        if let Some(path) = env_path("APPDATA") {
+            return Ok(path.join("lan-chat"));
+        }
+        if let Some(path) = env_path("USERPROFILE") {
+            return Ok(path.join("AppData").join("Local").join("lan-chat"));
+        }
+    } else {
+        if let Some(path) = env_path("XDG_DATA_HOME") {
+            return Ok(path.join("lan-chat"));
+        }
+        if let Some(path) = env_path("HOME") {
+            return Ok(path.join(".local").join("share").join("lan-chat"));
+        }
+    }
+
+    bail!(
+        "cannot locate a client data directory; set LAN_CHAT_CLIENT_DATA_DIR, or configure the platform user data directory"
+    )
+}
+
 fn validate_record(record: &StoredGroupCredential) -> Result<()> {
     if !is_valid_group_credential(&record.join_token)
         || record
@@ -205,6 +237,93 @@ fn set_private_path_permissions(path: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn resolve_data_directory(windows: bool, variables: &[(&str, &str)]) -> Result<PathBuf> {
+        default_client_data_directory_for(windows, |name| {
+            variables
+                .iter()
+                .find(|(key, _)| *key == name)
+                .map(|(_, value)| OsString::from(value))
+        })
+    }
+
+    #[test]
+    fn explicit_client_data_directory_has_priority() {
+        let directory = resolve_data_directory(
+            true,
+            &[
+                ("LAN_CHAT_CLIENT_DATA_DIR", "D:/lan-chat-portable"),
+                ("LOCALAPPDATA", "C:/Users/Alice/AppData/Local"),
+            ],
+        )
+        .unwrap();
+
+        assert_eq!(directory, PathBuf::from("D:/lan-chat-portable"));
+    }
+
+    #[test]
+    fn windows_uses_local_app_data() {
+        let directory =
+            resolve_data_directory(true, &[("LOCALAPPDATA", "C:/Users/Alice/AppData/Local")])
+                .unwrap();
+
+        assert_eq!(
+            directory,
+            PathBuf::from("C:/Users/Alice/AppData/Local").join("lan-chat")
+        );
+    }
+
+    #[test]
+    fn windows_falls_back_to_roaming_app_data() {
+        let directory =
+            resolve_data_directory(true, &[("APPDATA", "C:/Users/Alice/AppData/Roaming")]).unwrap();
+
+        assert_eq!(
+            directory,
+            PathBuf::from("C:/Users/Alice/AppData/Roaming").join("lan-chat")
+        );
+    }
+
+    #[test]
+    fn windows_falls_back_to_user_profile() {
+        let directory = resolve_data_directory(true, &[("USERPROFILE", "C:/Users/Alice")]).unwrap();
+
+        assert_eq!(
+            directory,
+            PathBuf::from("C:/Users/Alice")
+                .join("AppData")
+                .join("Local")
+                .join("lan-chat")
+        );
+    }
+
+    #[test]
+    fn unix_uses_xdg_data_home() {
+        let directory =
+            resolve_data_directory(false, &[("XDG_DATA_HOME", "/home/alice/.local/share")])
+                .unwrap();
+
+        assert_eq!(
+            directory,
+            PathBuf::from("/home/alice/.local/share/lan-chat")
+        );
+    }
+
+    #[test]
+    fn empty_environment_values_are_ignored() {
+        let error = resolve_data_directory(
+            true,
+            &[
+                ("LAN_CHAT_CLIENT_DATA_DIR", ""),
+                ("LOCALAPPDATA", ""),
+                ("APPDATA", ""),
+                ("USERPROFILE", ""),
+            ],
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("LAN_CHAT_CLIENT_DATA_DIR"));
+    }
 
     #[test]
     fn credentials_round_trip_without_becoming_public() {
